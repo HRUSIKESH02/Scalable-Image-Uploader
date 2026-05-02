@@ -1,110 +1,129 @@
-# Scalable Image Upload System (Node.js + Express + S3 + NGINX)
+# Scalable Image Uploader
 
-This project provides a scalable image upload service with:
-- `POST /upload` endpoint for multipart uploads
-- Validation for image type (`JPG/PNG`) and max size (`2MB`)
-- AWS S3 upload using AWS SDK v3
-- NGINX load balancing across multiple Node instances
-- GitHub Actions CI pipeline
-- Optional image resizing (Sharp) before upload
+Backend assignment project using Node.js, Express, AWS S3, and NGINX.
 
-## 1) Project Structure
+It includes:
+- `POST /upload` API (`multipart/form-data`, field name: `image`)
+- file validation (JPG/PNG only, max size 2MB)
+- upload to AWS S3 using AWS SDK v3
+- unique object naming (timestamp + UUID)
+- multiple backend instances (`3001`, `3002`)
+- NGINX round-robin load balancer on port `80`
+- GitHub Actions CI smoke test
+- optional image resizing with Sharp
+
+Constraints followed:
+- no database
+- no authentication
+
+## Project Structure
 
 ```text
 .
-├─ .github/
-│  └─ workflows/
-│     └─ main.yml
-├─ nginx/
-│  └─ nginx.conf
-├─ scripts/
-│  └─ ci-smoke.js
-├─ src/
-│  ├─ config/
-│  │  └─ env.js
-│  ├─ controllers/
-│  │  └─ uploadController.js
-│  ├─ middleware/
-│  │  ├─ errorHandler.js
-│  │  └─ uploadMiddleware.js
-│  ├─ routes/
-│  │  └─ uploadRoutes.js
-│  ├─ services/
-│  │  ├─ imageService.js
-│  │  └─ s3Service.js
-│  ├─ utils/
-│  │  └─ AppError.js
-│  ├─ app.js
-│  └─ server.js
-├─ .env.example
-├─ .gitignore
-├─ Dockerfile
-├─ package.json
-└─ README.md
+|-- .github/workflows/main.yml
+|-- nginx/nginx.conf
+|-- scripts/ci-smoke.js
+|-- src/
+|   |-- config/env.js
+|   |-- controllers/uploadController.js
+|   |-- middleware/errorHandler.js
+|   |-- middleware/uploadMiddleware.js
+|   |-- routes/uploadRoutes.js
+|   |-- services/imageService.js
+|   |-- services/s3Service.js
+|   |-- utils/AppError.js
+|   |-- app.js
+|   `-- server.js
+|-- .env.example
+|-- Dockerfile
+|-- package.json
+`-- README.md
 ```
 
-## 2) Setup
+## 1) Setup
 
-1. Install dependencies:
+Install dependencies:
+
 ```bash
 npm install
 ```
 
-2. Create `.env` from `.env.example` and fill your AWS values:
-```bash
-cp .env.example .env
+Create env file:
+
+Windows PowerShell:
+
+```powershell
+Copy-Item .env.example .env
 ```
 
-3. Start one instance:
+Update `.env`:
+
+```env
+PORT=3001
+NODE_ENV=development
+AWS_REGION=us-east-1
+AWS_ACCESS_KEY_ID=your-access-key-id
+AWS_SECRET_ACCESS_KEY=your-secret-access-key
+S3_BUCKET_NAME=your-bucket-name
+ENABLE_IMAGE_RESIZE=true
+RESIZE_WIDTH=1200
+```
+
+## 2) Run Backend
+
+Single instance:
+
 ```bash
 npm start
 ```
 
+Health check:
 
-The upload response format:
+- `http://localhost:3001/health`
 
-```json
-{
-  "url": "https://<bucket-name>.s3.amazonaws.com/<image-name>"
-}
-```
+## 3) Run Multiple Instances
 
-## 4) Run Multiple Backend Servers
+Open two terminals.
 
-Run two instances on different ports:
+Terminal 1:
 
-Linux/macOS:
-```bash
-PORT=3001 npm start
-PORT=3002 npm start
-```
-
-PowerShell (Windows):
 ```powershell
 $env:PORT=3001; npm start
+```
+
+Terminal 2:
+
+```powershell
 $env:PORT=3002; npm start
 ```
 
-## 5) NGINX Load Balancer
+Verify:
 
-Use [`nginx/nginx.conf`](nginx/nginx.conf). It does round-robin load balancing by default:
+- `http://localhost:3001/health`
+- `http://localhost:3002/health`
+
+## 4) NGINX Load Balancer
+
+Use [`nginx/nginx.conf`](nginx/nginx.conf).
+
+Upstream servers:
 - `127.0.0.1:3001`
 - `127.0.0.1:3002`
 
-Example local run:
-1. Start both Node servers.
-2. Run NGINX with this config (path depends on your install):
+Run NGINX (example):
+
 ```bash
-nginx -c /absolute/path/to/nginx/nginx.conf
-```
-3. Send requests to:
-```text
-http://localhost/upload
+nginx -c /absolute/path/to/CLOUDPROJECT/nginx/nginx.conf
 ```
 
-## 6) Upload API
+Verify load-balanced endpoint:
+
+- `http://localhost/health`
+
+## 5) Upload API
 
 Endpoint:
+
 ```text
 POST /upload
 Content-Type: multipart/form-data
@@ -112,77 +131,81 @@ Form field name: image
 ```
 
 Validation:
-- Only `image/jpeg` and `image/png`
-- Max file size: `2MB`
+- only `image/jpeg` and `image/png`
+- max size `2MB`
 
-## 7) Testing with curl
+Success response:
+
+```json
+{
+  "url": "https://<bucket-name>.s3.amazonaws.com/<image-name>"
+}
+```
+
+## 6) Testing with cURL
 
 Direct instance:
+
 ```bash
-curl -X POST http://localhost:3001/upload \
-  -F "image=@/absolute/path/to/test-image.jpg"
+curl -X POST http://localhost:3001/upload -F "image=@/absolute/path/to/test.jpg"
 ```
 
 Through NGINX:
+
 ```bash
-curl -X POST http://localhost/upload \
-  -F "image=@/absolute/path/to/test-image.png"
+curl -X POST http://localhost/upload -F "image=@/absolute/path/to/test.png"
 ```
 
-## 8) GitHub Actions CI
+Windows PowerShell:
+
+```powershell
+curl.exe -X POST http://localhost/upload -F "image=@C:/full/path/test.jpg"
+```
+
+## 7) GitHub Actions CI
 
 Workflow file: [`.github/workflows/main.yml`](.github/workflows/main.yml)
 
-It runs on `push` and `pull_request`:
-1. Checks out code
-2. Installs dependencies
-3. Starts server and smoke-tests `/health`
-4. Fails the pipeline if startup/health check fails
+Triggers:
+- `push`
+- `pull_request`
+- manual run (`workflow_dispatch`)
 
-## 9) Docker (Bonus)
+Pipeline steps:
+1. checkout
+2. install dependencies (`npm ci`)
+3. run smoke test (`npm run ci:smoke`) which starts server and checks `/health`
 
-Build image:
+CI fails if build/startup/health check fails.
+
+## 8) Bonus Features
+
+Docker build:
+
 ```bash
 docker build -t image-upload-service .
 ```
 
-Run container:
+Docker run:
+
 ```bash
 docker run --rm -p 3001:3001 --env-file .env image-upload-service
 ```
 
-## 10) Image Resizing (Bonus)
+Image resizing config:
 
-The service can resize images before upload using Sharp.
-
-Environment variables:
-- `ENABLE_IMAGE_RESIZE=true|false`
-- `RESIZE_WIDTH=1200`
-
-Behavior:
-- Keeps aspect ratio
-- Prevents upscaling small images
-- Auto-rotates using EXIF metadata
-
-## 11) Commands Summary
-
-Install:
-```bash
-npm install
+```env
+ENABLE_IMAGE_RESIZE=true
+RESIZE_WIDTH=1200
 ```
 
-Run single instance:
-```bash
-npm start
-```
+Resize behavior:
+- keeps aspect ratio
+- avoids upscaling
+- auto-rotates using EXIF metadata
 
-Run two instances:
-```bash
-PORT=3001 npm start
-PORT=3002 npm start
-```
+## 9) Notes
 
-Smoke test (used in CI):
-```bash
-npm run ci:smoke
-```
+- `GET /` returns `{"error":"Route not found."}` by design.
+- Use `/health` in browser checks.
+- If bucket/object is private, upload can succeed even if URL is not publicly viewable.
